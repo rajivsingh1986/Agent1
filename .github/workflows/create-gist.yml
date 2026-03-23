@@ -1,0 +1,65 @@
+name: Publish L4 CSS as Public Gist
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'l4-css.txt'
+  workflow_dispatch:
+
+jobs:
+  publish-gist:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create or update public gist
+        id: gist
+        env:
+          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          DESCRIPTION="L4 Process Map Generator - CSS Specification for M365 Copilot Agent"
+          FILENAME="l4-css.txt"
+
+          # Use jq to safely encode the file content into a JSON payload,
+          # handling all special characters and newlines correctly.
+          PAYLOAD=$(jq -n \
+            --arg desc "$DESCRIPTION" \
+            --arg fname "$FILENAME" \
+            --rawfile content "$FILENAME" \
+            '{description: $desc, public: true, files: {($fname): {content: $content}}}')
+
+          # Check whether a gist with this description already exists
+          EXISTING_ID=$(gh api /gists \
+            --paginate \
+            --jq ".[] | select(.description == \"$DESCRIPTION\") | .id" \
+            2>/dev/null | head -n1)
+
+          if [ -n "$EXISTING_ID" ]; then
+            echo "Updating existing gist: $EXISTING_ID"
+            echo "$PAYLOAD" | gh api --method PATCH /gists/"$EXISTING_ID" --input -
+            GIST_ID="$EXISTING_ID"
+          else
+            echo "Creating new public gist..."
+            RESPONSE=$(echo "$PAYLOAD" | gh api --method POST /gists --input -)
+            GIST_ID=$(echo "$RESPONSE" | jq -r '.id')
+          fi
+
+          USERNAME=$(gh api /user --jq '.login')
+          RAW_URL="https://gist.githubusercontent.com/$USERNAME/$GIST_ID/raw/$FILENAME"
+
+          echo "gist_id=$GIST_ID" >> "$GITHUB_OUTPUT"
+          echo "raw_url=$RAW_URL" >> "$GITHUB_OUTPUT"
+          echo ""
+          echo "=============================================="
+          echo "Gist ID : $GIST_ID"
+          echo "Raw URL : $RAW_URL"
+          echo "=============================================="
+          echo ""
+          echo "Paste this URL into:"
+          echo "  M365 Copilot Agent Builder → Knowledge → Add website URL"
